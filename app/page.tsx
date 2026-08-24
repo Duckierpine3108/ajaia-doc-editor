@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Editor } from "@/components/Editor";
 import { FileText, Share2, Plus, Upload, User, CheckCircle2 } from "lucide-react";
-import { parse } from "marked";
+import { marked } from "marked";
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState({ id: "alice-id", name: "Alice (Owner)", email: "alice@ajaia.internal" });
@@ -20,11 +20,15 @@ export default function Home() {
   }, [currentUser]);
 
   const fetchDocs = async (userId: string) => {
-    const res = await fetch(`/api/documents?userId=${userId}`);
-    if (res.ok) {
-      const data = await res.json();
-      setOwnedDocs(data.owned || []);
-      setSharedDocs(data.shared || []);
+    try {
+      const res = await fetch(`/api/documents?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setOwnedDocs(data.owned || []);
+        setSharedDocs(data.shared || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch documents:", err);
     }
   };
 
@@ -36,61 +40,94 @@ export default function Home() {
   };
 
   const createNewDoc = async (initialTitle = "Untitled Document", initialContent = "<p>Start typing...</p>") => {
-    const res = await fetch("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: initialTitle, content: initialContent, ownerId: currentUser.id }),
-    });
-    if (res.ok) {
-      const newDoc = await res.json();
-      setSelectedDoc(newDoc);
-      setTitle(newDoc.title);
-      setContent(newDoc.content);
-      fetchDocs(currentUser.id);
+    try {
+      const res = await fetch("/api/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          title: initialTitle, 
+          content: initialContent, 
+          ownerId: currentUser.id,
+          ownerEmail: currentUser.email,
+          ownerName: currentUser.name
+        }),
+      });
+      if (res.ok) {
+        const newDoc = await res.json();
+        setSelectedDoc(newDoc);
+        setTitle(newDoc.title);
+        setContent(newDoc.content);
+        fetchDocs(currentUser.id);
+      }
+    } catch (err) {
+      console.error("Failed to create document:", err);
     }
   };
 
   const saveDoc = async () => {
     if (!selectedDoc) return;
-    const res = await fetch(`/api/documents/${selectedDoc.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content }),
-    });
-    if (res.ok) {
-      setStatusMsg("Saved!");
-      setTimeout(() => setStatusMsg(""), 2000);
-      fetchDocs(currentUser.id);
+    try {
+      const res = await fetch(`/api/documents/${selectedDoc.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content }),
+      });
+      if (res.ok) {
+        setStatusMsg("Saved!");
+        setTimeout(() => setStatusMsg(""), 2000);
+        fetchDocs(currentUser.id);
+      }
+    } catch (err) {
+      console.error("Failed to save document:", err);
     }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const text = event.target?.result as string;
-      let parsedHtml = file.name.endsWith(".md") ? await parse(text) : `<p>${text.replace(/\n/g, "<br/>")}</p>`;
-      createNewDoc(file.name.replace(/\.[^/.]+$/, ""), parsedHtml);
+      try {
+        const text = (event.target?.result as string) || "";
+        let parsedHtml = "<p></p>";
+
+        if (file.name.endsWith(".md")) {
+          const parsed = await marked.parse(text);
+          parsedHtml = String(parsed);
+        } else {
+          parsedHtml = `<p>${text.replace(/\n/g, "<br/>")}</p>`;
+        }
+
+        const docTitle = file.name.replace(/\.[^/.]+$/, "");
+        await createNewDoc(docTitle || "Imported Document", parsedHtml);
+      } catch (err) {
+        console.error("File parsing error:", err);
+      }
     };
     reader.readAsText(file);
+    e.target.value = ""; // Reset input so you can re-upload the same file if needed
   };
 
   const handleShare = async () => {
     if (!selectedDoc || !shareEmail) return;
-    const res = await fetch(`/api/documents/${selectedDoc.id}/share`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetEmail: shareEmail }),
-    });
-    if (res.ok) {
-      setStatusMsg(`Shared with ${shareEmail}`);
-      setShareEmail("");
-      setTimeout(() => setStatusMsg(""), 3000);
-      fetchDocs(currentUser.id);
-    } else {
-      setStatusMsg("User not found!");
-      setTimeout(() => setStatusMsg(""), 3000);
+    try {
+      const res = await fetch(`/api/documents/${selectedDoc.id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetEmail: shareEmail }),
+      });
+      if (res.ok) {
+        setStatusMsg(`Shared with ${shareEmail}`);
+        setShareEmail("");
+        setTimeout(() => setStatusMsg(""), 3000);
+        fetchDocs(currentUser.id);
+      } else {
+        setStatusMsg("User not found!");
+        setTimeout(() => setStatusMsg(""), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to share document:", err);
     }
   };
 
